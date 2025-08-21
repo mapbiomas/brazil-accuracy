@@ -625,42 +625,200 @@ def population_estimation(df):
 
 def covariance(x, y):
     """Calculates covariance between two arrays."""
-    # (Implementation as provided)
+    if x.size < 1:
+        x_mean = np.mean(x)
+        y_mean = np.mean(y)
+
+        return np.sum((x - x_mean) * (y - y_mean) / (x.size - 1))
+    else:
+        return 0.0
 
 def user_prod_se(df, class_val, user_acc, prod_acc, map_total, ref_total):
     """
     Calculates the Standard Error (SE) for User's and Producer's Accuracy
     using formulas that account for the stratified sampling design.
     """
-    # (Implementation of statistical formulas as provided)
+    user_var = 0
+    prod_var = 0
 
+    user_se = 0
+    prod_se = 0
+
+    for name, df_strata in df.groupby('strata_id'):
+        ref_val_s = df_strata['reference'].to_numpy()
+        map_val_s = df_strata['classification'].to_numpy()
+
+        map_total_s = np.where((map_val_s == class_val), 1, 0)
+        map_correct_s = np.where(np.logical_and((map_val_s == class_val),(map_val_s == ref_val_s)), 1, 0)
+
+        ref_total_s = np.where((ref_val_s == class_val), 1, 0)
+        ref_correct_s = np.where(np.logical_and((ref_val_s == class_val),(map_val_s == ref_val_s)), 1, 0)
+        
+        nsamples_s, _ = df_strata.shape
+        population_s = population_estimation(df_strata)
+
+        user_var += math.pow(population_s,2) * (1 - nsamples_s/population_s) \
+                                    * ( math.pow(   np.var(map_correct_s) , 2) \
+                                            + math.pow(user_acc,2) * math.pow( np.var(map_total_s) , 2) \
+                                            - 2 * user_acc * covariance(map_total_s, map_correct_s) \
+                                        ) / nsamples_s
+
+        prod_var += math.pow(population_s,2) * (1 - nsamples_s/population_s) \
+                                    * ( math.pow(   np.var(ref_correct_s) , 2) \
+                                            + math.pow(prod_acc,2) * math.pow( np.var(ref_total_s) , 2) \
+                                            - 2 * prod_acc * covariance(ref_total_s, ref_correct_s) \
+                                        ) / nsamples_s
+
+    if (map_total !=0):
+        user_var = 1 / math.pow(map_total,2) * user_var
+        user_se = 1.96 * math.sqrt(user_var)
+
+    if (ref_total !=0):
+        prod_var = 1 / math.pow(ref_total,2) * prod_var
+        prod_se = 1.96 * math.sqrt(prod_var)
+
+    return user_se, prod_se
+    
 def global_se(df, mask, population):
     """Calculates the Standard Error (SE) for the Global Accuracy."""
-    # (Implementation of statistical formulas as provided)
+    glob_var = 0
+
+    for name, df_strata in df.groupby('strata_id'):
+        ref_val_s = df['reference'].to_numpy()
+        map_val_s = df['classification'].to_numpy()
+
+        map_correct_s = np.where(mask, 1, 0)
+
+        nsamples_s, _ = df_strata.shape
+        population_s = population_estimation(df_strata)
+        
+        glob_var += math.pow(population_s,2) * (1 - nsamples_s/population_s) \
+                                * np.var(map_correct_s) / nsamples_s
+
+    glob_var = (1 / math.pow(population,2)) * glob_var
+    glob_se = 1.96 * math.sqrt(glob_var)
+
+    return glob_se
+
 
 def calc_map_bias(df, class_values):
     """Calculates the bias in the map's area estimates for each class."""
-    # (Implementation as provided)
+    map_bias_arr = []
+    map_bias_se_arr = []
+
+    ref_val = df['reference'].to_numpy()
+    map_val = df['classification'].to_numpy()
+    samp_weight = 1 / df['PESO_VOT'].to_numpy()
+
+    population = population_estimation(df)
+
+    for class_val in class_values:
+    
+        map_mask = np.logical_and((map_val == class_val), (ref_val != class_val))
+        map_comission_prop = np.sum(np.where(map_mask, 1, 0) * samp_weight) / population
+
+        ref_mask = np.logical_and((ref_val == class_val), (map_val != class_val))
+        map_omission_prop = np.sum(np.where(ref_mask, 1, 0) * samp_weight) / population
+
+        map_bias = (map_omission_prop - map_comission_prop)
+        
+        se_mask = np.logical_xor(ref_mask,map_mask)
+        map_bias_se = global_se(df, se_mask, population)
+
+        map_bias_arr.append(map_bias)
+        map_bias_se_arr.append(map_bias_se)
+
+    return map_bias_arr, map_bias_se_arr
 
 def refarea_pop(df, class_values):
     """Estimates the area proportion for each reference class and its SE."""
-    # (Implementation as provided)
+    refarea_prop_arr = []
+    refarea_se_arr = []
+
+    ref_val = df['reference'].to_numpy()
+    map_val = df['classification'].to_numpy()
+    samp_weight = 1 / df['PESO_VOT'].to_numpy()
+
+    population = population_estimation(df)
+
+    for class_val in class_values:
+    
+        ref_mask = (ref_val == class_val)
+        refarea = np.sum(np.where(ref_mask, 1, 0) * samp_weight)
+
+        refarea_prop = (refarea / population)
+        refarea_se = global_se(df, ref_mask, population)
+
+        refarea_prop_arr.append(refarea_prop)
+        refarea_se_arr.append(refarea_se)
+
+    return refarea_prop_arr, refarea_se_arr
 
 def global_acc(df):
     """Calculates the Global Accuracy and its Standard Error (SE)."""
-    # (Implementation as provided)
+    ref_val = df['reference'].to_numpy()
+    map_val = df['classification'].to_numpy()
+    samp_weight = 1 / df['PESO_VOT'].to_numpy()
+    
+    mask_correct = (map_val == ref_val)
+    map_correct = np.sum(np.where(mask_correct, 1, 0) * samp_weight)
+    population = population_estimation(df)
+
+    glob_acc = (map_correct / population)
+
+    glob_acc = glob_acc
+    glob_se = global_se(df, mask_correct, population)
+
+    return glob_acc, glob_se
+
 
 def user_prod_acc(df, class_values):
     """Calculates User's and Producer's Accuracy and their SE for all classes."""
-    # (Implementation as provided)
+    user_acc_arr = []
+    prod_acc_arr = []
+    user_se_arr = []
+    prod_se_arr = []
+
+    ref_val = df['reference'].to_numpy()
+    map_val = df['classification'].to_numpy()
+    samp_weight = 1.0 / df['PESO_VOT'].to_numpy()
+
+    for class_val in class_values:
+
+        map_total = np.sum(np.where((map_val == class_val), 1, 0) * samp_weight)
+        map_correct = np.sum(np.where(np.logical_and((map_val == class_val),(map_val == ref_val)), 1, 0) * samp_weight)
+
+        ref_total = np.sum(np.where((ref_val == class_val), 1, 0) * samp_weight)
+        ref_correct = np.sum(np.where(np.logical_and((ref_val == class_val),(map_val == ref_val)), 1, 0) * samp_weight)
+
+        user_acc = 0
+        if map_total > 0:
+            user_acc = map_correct / map_total
+
+        prod_acc = 0
+        if ref_total > 0:
+            prod_acc = ref_correct / ref_total
+
+        user_se, prod_se = user_prod_se(df, class_val, user_acc, prod_acc, map_total, ref_total)
+
+        user_acc_arr.append(user_acc)
+        prod_acc_arr.append(prod_acc)
+        user_se_arr.append(user_se)
+        prod_se_arr.append(prod_se)
+
+    return user_acc_arr, prod_acc_arr, user_se_arr, prod_se_arr
 
 # --- DATA CLEANING AND REMAPPING FUNCTIONS ---
 
 def mod_BioNB(df):
     """Replaces numeric biome IDs with their string names."""
-    df.loc[(df['BioNB'] == 1), 'BioNB'] = 'Amazônia'
-    df.loc[(df['BioNB'] == 2), 'BioNB'] = 'Mata Atlântica'
-    # ... (rest of the biome mappings)
+    df.loc[ (df['BioNB']==1),'BioNB'] = 'Amazônia'
+    df.loc[ (df['BioNB']==2),'BioNB'] = 'Mata Atlântica'
+    df.loc[ (df['BioNB']==3),'BioNB'] = 'Pantanal'
+    df.loc[ (df['BioNB']==4),'BioNB'] = 'Cerrado'
+    df.loc[ (df['BioNB']==5),'BioNB'] = 'Caatinga'
+    df.loc[ (df['BioNB']==6),'BioNB'] = 'Pampa'
+    
     return df
 
 def config_class(df):
@@ -670,11 +828,55 @@ def config_class(df):
     data cleaning and harmonization step.
     """
     # --- Global Rules ---
-    # Merge detailed temporary crop classes into the main one (19).
-    df.loc[(df['classification'] == 20) | (df['classification'] == 39) | (df['classification'] == 40) | (df['classification'] == 41) | (df['classification'] == 62), 'classification'] = 19
-    # Merge detailed perennial crop classes into the main one (36).
-    df.loc[(df['classification'] == 46) | (df['classification'] == 47) | (df['classification'] == 48), 'classification'] = 36
-    # ... (many other global and biome-specific rules as provided) ...
+    #Global
+
+    df.loc[ (df['classification'] == 20) | (df['classification'] == 39) | (df['classification'] == 40) | (df['classification'] == 41) | (df['classification'] == 62), 'classification'] = 19 #Convert areas mapped as 20,39,40,41 to 19
+    
+    df.loc[ (df['classification'] == 46) | (df['classification'] == 47) | (df['classification'] == 48), 'classification'] = 36 #Convert areas mapped as 46,47,48 to 36
+
+    df.loc[ (df['classification'] == 51) | (df['classification'] == 52) | (df['classification'] == 53), 'classification'] = 24 #Convert areas mapped as 20,39,41 to 24
+
+    df.loc[ (df['classification'] == 49), 'classification'] = 3 #Convert areas mapped as 54,55,56 to 33
+
+    df.loc[ (df['classification'] == 54) | (df['classification'] == 55) | (df['classification'] == 56), 'classification'] = 33 #Convert areas mapped as 54,55,56 to 33
+    
+    df.loc[ (df['classification'] == 21) & (df['reference'].isin([15,19,20,36])), 'reference'] = 21 #Convert reference from 15,19,20,36 to reference 21 for areas mapped as 21
+
+    df.loc[ (df['classification'] == 63), 'classification'] = 33    
+
+
+    #Pampa 
+
+    df.loc[ (df['BioNB']== 'Pampa') & (df['reference'] == 15),'reference'] = 19 #In Pampa, convert reference class 15 to 19 (Crop).
+    df.loc[ (df['BioNB']=='Pampa') & (df['classification'] == 25) & (df['reference'] == 23), 'reference'] = 25 #In Pampa, convert reference 25 to 23 in areas mapped as 25
+    df.loc[ (df['BioNB']== 'Pampa') & (df['classification'] == 12) & (df['reference'] == 13),'reference'] = 12 #In Pampa, convert reference 13 to 12 in areas mapped as 12
+    df.loc[ (df['BioNB']== 'Pampa') & (df['classification'] == 13),'classification'] = 12 #In Pampa, convert reference 13 to 12 in areas mapped as 12
+
+    #Mata Atântica
+
+    df.loc[ (df['BioNB']== 'Mata Atlântica') & (df['classification'] == 11) & (df['reference'] == 13),'reference'] = 11
+
+    #Pantanal
+
+    df.loc[ (df['BioNB']== 'Pantanal') & (df['classification'] == 11) & (df['reference'] == 12),'reference'] = 11 #In Pantanal, convert reference 12 to 11 in areas mapped as 11
+    df.loc[ (df['BioNB']== 'Pantanal') & (df['classification'] == 11) & (df['reference'] == 33),'reference'] = 11 #In Pantanal, convert reference 33 to 11 in areas mapped as 11
+    df.loc[ (df['BioNB']== 'Pantanal') & (df['classification'] == 12) & (df['reference'] == 33),'reference'] = 12 #In Pantanal, convert reference 33 to 12 in areas mapped as 12
+    df.loc[ (df['BioNB']== 'Pantanal') & (df['classification'] == 12) & (df['reference'] == 11),'reference'] = 12
+    df.loc[ (df['BioNB']== 'Pantanal') & (df['classification'] == 33) & (df['reference'] == 11),'classification'] = 11 #In Pantanal, convert reference 33 to 11 in areas mapped as 11
+    df.loc[ (df['BioNB']== 'Pantanal') & (df['classification'] == 33) & (df['reference'] == 12),'classification'] = 12 #In Pantanal, convert reference 33 to 12 in areas mapped as 12
+
+    #Amazônia
+
+    df.loc[ (df['BioNB']=='Amazônia') & (df['classification'] == 12) & (df['reference'] == 13), 'reference'] = 12 #In Amazon, convert reference 13 to 12 in areas mapped as 12
+    df.loc[ (df['BioNB']=='Amazônia') & (df['classification'] == 4) & (df['reference'] == 13), 'reference'] = 4 #In Amazon, convert reference 13 to 4 in areas mapped as 4
+
+    #Cerrado
+
+    df.loc[ (df['BioNB']=='Cerrado') & (df['reference'] == 11),'reference'] = 12
+    df.loc[ (df['BioNB']=='Cerrado') & (df['classification'] == 11),'classification'] = 12 
+    df.loc[ (df['BioNB']=='Cerrado') & (df['classification'] == 12)  & (df['reference'] == 13), 'reference'] = 12 #In Cerrado, convert reference 13 to 12 in areas mapped as 12
+    df.loc[ (df['BioNB']=='Cerrado') & (df['classification'] == 25) & (df['reference'] == 23), 'reference'] = 25 #In Cerrado, convert reference 25 to 23 in areas mapped as 25
+
     return df
 
 # --- 5. MAIN EXECUTION LOGIC ---
@@ -700,8 +902,13 @@ dfPq = pd.read_parquet(output_all_file)
 regions = dfPq['BioNB'].unique().tolist()
 regions.append('BRASIL')
 
+pd_cols = {'iniciative':[],'collection':[],'territory':[],'year':[],'version':[],'level':[],'id_class_ref':[],
+    'id_class_map':[],'value':[], 'Samples_Used':[],'Adj_population':[],'Adj_population_se':[],'Producer_Acc':[],
+    'Producer_stdErr':[],'Omission_Error':[],'Allocation_Tot':[],'Pop_Prop':[],'Pop_Bias':[],
+    'Pop_Bias_SE':[],'User_Acc':[],'User_stdErr':[],'Comission_Error':[],'Quantity_Tot':[],'GlobalAccuracy':[]}
+
 # Initialize an empty DataFrame to hold the final results.
-areaEstimatives = pd.DataFrame() # Simplified from original
+areaEstimatives = pd.DataFrame(pd_cols) # Simplified from original
 
 # Define the final output CSV filename from the 4th command-line argument.
 output_area_name = path.join(output_dir, ''.join([str(sys.argv[4]) + '.csv']))
