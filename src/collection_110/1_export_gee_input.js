@@ -1,9 +1,9 @@
-// Load raster images for Brazilian biomes and states. These will be used to tag each sample point.
-var biomes = ee.Image('projects/mapbiomas-workspace/AUXILIAR/biomas-raster-41');
-var states = ee.Image('projects/mapbiomas-workspace/AUXILIAR/estados-2016-raster');
+// Bases de dados
+var states = ee.Image('projects/mapbiomas-workspace/AUXILIAR/bioma25_uf24_30m').mod(100).int().round().rename('uf');
+var biomes = ee.Image('projects/mapbiomas-workspace/AUXILIAR/bioma25_uf24_30m').divide(100).int().round().rename('bioma');
 
 // A dictionary to map biome numeric codes to their names. Not used here, but good for context.
-var bioDict = {1:'Amazônia', 2:'Mata Atlântica', 3:'Pantanal', 4:'Cerrado', 5:'Caatinga', 6:'Pampa'};
+var bioDict = {1:'Amazônia', 2:'Caatinga', 3:'Cerrado', 4:'Mata Atlântica', 5:'Pampa', 6:'Pantanal'};
 
 // An array of years to process, from 1985 to 2024.
 var anos = ['1985', '1986', '1987','1988', '1989', '1990','1991', '1992', '1993','1994', '1995', '1996',
@@ -62,18 +62,19 @@ var cols = {
   'c8':'projects/mapbiomas-public/assets/brazil/lulc/collection8/mapbiomas_collection80_integration_v1',
   'c9':'projects/mapbiomas-public/assets/brazil/lulc/collection9/mapbiomas_collection90_integration_v1',
   'c10':'projects/mapbiomas-public/assets/brazil/lulc/collection10/mapbiomas_brazil_collection10_integration_v2',
+  'c11':'projects/mapbiomas-public/assets/brazil/lulc/collection11/mapbiomas_brazil_collection11_integration_v1'
 };
 
 // Get a list of the collection keys to iterate over.
 var col_list = Object.keys(cols);
 
-col_list = ['c10']
+col_list = ['c11']
 
 // --- START OUTER LOOP: Iterate over each MapBiomas collection ---
 col_list.forEach(function(col_id){
   
   // Define the asset path for the reference sample points.
-  var assetSamples = 'projects/steel-ace-464818-n7/assets/mapbiomas_85k_col5_points_w_edge_and_edited_v2';
+  var assetSamples = 'projects/mapbiomas-workspace/VALIDACAO/mapbiomas_85k_col5_points_w_edge_and_edited_v3';
   // Get the asset path for the current MapBiomas collection.
   var assetMapBiomas = cols[col_id];
   // Define a folder name for exporting results for this collection.
